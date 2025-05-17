@@ -1,0 +1,181 @@
+
+manifest.json
+{
+  "manifest_version": 3,
+  "name": "ThinkPasse Password Manager",
+  "version": "1.0",
+  "permissions": [
+    "storage",
+    "identity",
+    "identity.email"
+  ],
+  "host_permissions": ["https://www.googleapis.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "oauth2": {
+    "client_id": "973538339521-p2cbcf6qnk8c3vj13jgrht4o619og09q.apps.googleusercontent.com",
+    "scopes": ["https://www.googleapis.com/auth/drive.file"],
+    "chrome_app": {
+      "ids": ["cpbddphgnhcdikjgibeipnbjphkjohkd"]
+  }
+}
+}
+
+
+
+popup.html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>ThinkPasse</title>
+    <script src="popup.js"></script>
+  </head>
+  <body>
+    <h1>Write your username and password</h1>
+    <label for="username">Username:</label>
+    <input type="text" id="username" /><br />
+    <label for="password">Password:</label>
+    <input type="password" id="password" /><br />
+    <button id="save">Save</button>
+  </body>
+</html>
+
+
+popup.js
+document.addEventListener("DOMContentLoaded", function () {
+  var saveButton = document.getElementById("save");
+  saveButton.addEventListener("click", saveCredentials);
+});
+
+function saveCredentials() {
+  var username = document.getElementById("username").value;
+  var password = document.getElementById("password").value;
+
+  chrome.storage.sync.set({ username: username, password: password }, function () {
+    console.log("Credentials saved successfully.");
+    saveFile(username, password);
+  });
+}
+
+function saveFile(username, password) {
+  chrome.identity.getAuthToken({ interactive: true }, function (token) {
+    var headers = new Headers({
+      Authorization: "Bearer " + token,
+    });
+
+    // Checking if the file already exists
+    fetch(
+      "https://www.googleapis.com/drive/v3/files?q=name%20%3D%20'passwords.txt'%20and%20'root'%20in%20parents",
+      {
+        method: "GET",
+        headers: headers,
+      }
+    )
+      .then(function (response) {
+        return response.json();
+      })
+      .then(function (data) {
+        if (data.files.length > 0) {
+          // File already exists, update the content
+          updateFileContent(data.files[0].id, username, password, headers);
+        } else {
+          // File doesn't exist, create a new one
+          createNewFile(username, password, headers);
+        }
+      })
+      .catch(function (error) {
+        console.error("Error checking file existence: ", error);
+      });
+  });
+}
+
+function updateFileContent(fileId, username, password, headers) {
+  // Fetch the existing content of the file
+  fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    method: "GET",
+    headers: headers,
+  })
+    .then(function (response) {
+      return response.text();
+    })
+    .then(function (content) {
+      // Append the new credential to the existing content
+      var fileContent = content + "\n" + username + ":" + password;
+
+      // Update the file with the new content
+      fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+        method: "PATCH",
+        headers: headers,
+        body: fileContent,
+      })
+        .then(function (response) {
+          console.log("File content updated successfully.");
+        })
+        .catch(function (error) {
+          console.error("Error updating file content: ", error);
+        });
+    })
+    .catch(function (error) {
+      console.error("Error fetching file content: ", error);
+    });
+}
+
+
+function createNewFile(username, password, headers) {
+  var metadata = {
+    name: "passwords.txt",
+    mimeType: "text/plain",
+    parents: ["root"],
+  };
+
+  var fileContent = "";
+
+  chrome.identity.getProfileUserInfo(function (userInfo) {
+    var userEmail = userInfo.email;
+    fileContent = userEmail + ":" + password;
+
+    var form = new FormData();
+    form.append(
+      "metadata",
+      new Blob([JSON.stringify(metadata)], { type: "application/json" })
+    );
+    form.append("file", new Blob([fileContent], { type: "text/plain" }));
+
+    fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+      method: "POST",
+      headers: headers,
+      body: form,
+    })
+      .then(function (response) {
+        console.log("File saved successfully.");
+      })
+      .catch(function (error) {
+        console.error("Error saving file: ", error);
+      });
+  });
+}
+
+
+background.js
+chrome.runtime.onInstalled.addListener(function () {
+  chrome.identity.getAuthToken({ interactive: true }, function (token) {
+    console.log("Token obtained: " + token);
+  });
+});
+
+
+the above include my code for the chrome extension. After loading the extension and entering the username and password for the first time it just shows the password in the password.txt file. But when I enter the username and password for second time then it shows both the username and password. I want it to store all the usernames and passwords including the first username.
